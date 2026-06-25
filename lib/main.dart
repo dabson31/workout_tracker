@@ -9,9 +9,6 @@ void main() async {
   // init hive
   await Hive.initFlutter();
 
-  // TEMPORARY — run once to wipe old seeded sample data, then remove this line
-  await Hive.deleteBoxFromDisk('workout_database');
-
   // open hive box
   await Hive.openBox('workout_database');
 
