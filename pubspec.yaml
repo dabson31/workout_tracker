@@ -38,6 +38,11 @@ dependencies:
   provider: ^6.1.5+1 
   hive: 
   hive_flutter:
+  flutter_heatmap_calendar: 
+  flutter_slidable: ^4.0.3
+  flutter_native_splash: ^2.4.8
+  google_fonts: ^8.1.0
+  fl_chart: ^1.2.0
 
 dev_dependencies:
   flutter_test:
@@ -49,6 +54,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -91,3 +97,10 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# icon for app (yes picture is ai generated for now)
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21

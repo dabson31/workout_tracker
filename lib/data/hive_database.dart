@@ -13,14 +13,14 @@ class HiveDatabase {
   // check if data exists, if not record start date
 bool previousDataExists() {
     if (_myBox.isEmpty) {
-      print("previous data doesn't exist");
+      //print("previous data doesn't exist");
       _myBox.put("START_DATE", todaysDateDDMMYYYY());
       return false;
     } else {
-      print("previous data does exist");
+      //print("previous data does exist");
       return true;
     }
-  }
+}
 
 
   // return start date as dd mm yyyy
@@ -36,9 +36,9 @@ void saveToDatabase(List<Workout> workouts) {
 
   // check if any have been done, we will put 0/1 for each date
   if (exerciseCompleted(workouts)) {
-    _myBox.put("COMPLETION_STATUS_" + todaysDateDDMMYYYY(), 1);
+    _myBox.put("COMPLETION_STATUS_${todaysDateDDMMYYYY()}", 1);
   } else {
-    _myBox.put("COMPLETION_STATUS_" + todaysDateDDMMYYYY(), 0);
+    _myBox.put("COMPLETION_STATUS_${todaysDateDDMMYYYY()}", 0);
   }
   // so it is COMPLETION_STATUS_29/05/2026
 
@@ -48,12 +48,12 @@ void saveToDatabase(List<Workout> workouts) {
 
 }
 
-  // read data and reutnr list of workouts
+  // read data and return list of workouts
   List<Workout> readFromDatabase() {
     List<Workout> mySavedWorkout = [];
 
     List<String> workoutNames = _myBox.get("WORKOUTS");
-    final exerciseDetails = _myBox.get("EXERCISE");
+    final exerciseDetails = _myBox.get("EXERCISES");
 
     // create workouts obj
     for (int i = 0; i < workoutNames.length; i++) {
@@ -96,12 +96,12 @@ bool exerciseCompleted(List<Workout> workouts) {
         }
       }
       return false;
-  }
+}
 
   // return completion status of a given date dd mm yyyy
 int getCompletionStatus(String ddmmyyyy) {
   // return 0/1 if null its 0
-  int completionStatus = _myBox.get("COMPLETION_STATUS_" + ddmmyyyy) ?? 0;
+  int completionStatus = _myBox.get("COMPLETION_STATUS_$ddmmyyyy") ?? 0;
   return completionStatus;
 }
 
@@ -116,10 +116,10 @@ List<String> convertObjectToWorkoutList(List<Workout> workouts) {
       workoutList.add(workouts[i].name);
     }
     return workoutList;
-  }
+}
 
 
-  // conerts exercise list to string to store in database
+  // converts exercise list to string to store in database
 List<List<List<String>>> convertObjectToExerciseList(List<Workout> workouts) {
     List<List<List<String>>> exerciseList = [
     ];
@@ -156,6 +156,58 @@ List<List<List<String>>> convertObjectToExerciseList(List<Workout> workouts) {
     }
 
     return exerciseList;
-  }
+}
+
+  // log what was actually performed for one exercise on a given date
+  // stored separately from the live exercise values, so history is never lost
+void saveExerciseLog(String ddmmyyyy, String workoutName, String exerciseName, String weight, String reps, String sets) {
+  List<String> existingLogs = List<String>.from(_myBox.get("LOG_$ddmmyyyy") ?? []);
+
+  // remove any existing entry for this exact exercise on this date, so we dont duplicate
+  existingLogs.removeWhere((log) {
+    final parts = log.split('|');
+    return parts[0] == workoutName && parts[1] == exerciseName;
+  });
+
+  // store as workoutName|exerciseName|weight|reps|sets
+  existingLogs.add('$workoutName|$exerciseName|$weight|$reps|$sets');
+
+  _myBox.put("LOG_$ddmmyyyy", existingLogs);
+}
+
+  // return everything logged on a given date, as a list of maps
+List<Map<String, String>> getExerciseLogsForDate(String ddmmyyyy) {
+  List<String> rawLogs = List<String>.from(_myBox.get("LOG_$ddmmyyyy") ?? []);
+
+  return rawLogs.map((log) {
+    final parts = log.split('|');
+    return {
+      'workout': parts[0],
+      'exercise': parts[1],
+      'weight': parts[2],
+      'reps': parts[3],
+      'sets': parts[4],
+    };
+  }).toList();
+}
+
+  // log/update bodyweight for a given date, overwrites if already logged that day
+void saveBodyWeight(String ddmmyyyy, double weightKg) {
+  Map<String, double> history = Map<String, double>.from(_myBox.get("BODYWEIGHT_HISTORY") ?? {});
+  history[ddmmyyyy] = weightKg;
+  _myBox.put("BODYWEIGHT_HISTORY", history);
+}
+
+  // returns full bodyweight history, sorted oldest to newest
+List<MapEntry<DateTime, double>> getBodyWeightHistory() {
+  Map<dynamic, dynamic> rawHistory = _myBox.get("BODYWEIGHT_HISTORY") ?? {};
+
+  List<MapEntry<DateTime, double>> entries = rawHistory.entries.map((entry) {
+    return MapEntry(createDateTimeObject(entry.key as String), (entry.value as num).toDouble());
+  }).toList();
+
+  entries.sort((a, b) => a.key.compareTo(b.key));
+  return entries;
+}
 
 }
