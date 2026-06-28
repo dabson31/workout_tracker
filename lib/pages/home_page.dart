@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:provider/provider.dart';
 import 'package:workout_tracker/components/heat_map.dart';
+import 'package:workout_tracker/components/premium_dialog.dart';
 import 'package:workout_tracker/data/workout_data.dart';
 import 'package:workout_tracker/datetime/date_time.dart';
+import 'package:workout_tracker/models/workout.dart';
+import 'package:workout_tracker/models/exercise.dart';
 import 'package:workout_tracker/pages/workout_page.dart';
 import 'package:workout_tracker/theme/app_theme.dart';
 
@@ -22,16 +25,20 @@ class _HomePageState extends State<HomePage> {
     Provider.of<WorkoutData>(context, listen: false).initializeWorkoutList();
   }
 
-  final newWorkoutController = TextEditingController();
+  final newWorkoutController  = TextEditingController();
   final editWorkoutController = TextEditingController();
 
-  // new workout
+  // ── workout CRUD ────────────────────────────────────────────────────────────
+
   void createNewWorkout() {
-    showDialog(
+    newWorkoutController.clear();
+    showPremiumDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        elevation: 12,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
         title: const Text('create new workout', style: TextStyle(color: AppColors.textPrimary)),
         content: TextField(
           controller: newWorkoutController,
@@ -56,15 +63,16 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // edit existing workout name
   void editWorkout(String oldName) {
     editWorkoutController.text = oldName;
 
-    showDialog(
+    showPremiumDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        elevation: 12,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
         title: const Text('rename workout', style: TextStyle(color: AppColors.textPrimary)),
         content: TextField(
           controller: editWorkoutController,
@@ -74,9 +82,27 @@ class _HomePageState extends State<HomePage> {
         actions: [
           MaterialButton(
             onPressed: () {
+              final newName = editWorkoutController.text.trim();
               Provider.of<WorkoutData>(context, listen: false)
-                  .editWorkoutName(oldName, editWorkoutController.text);
+                  .editWorkoutName(oldName, newName);
               Navigator.pop(context);
+
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  backgroundColor: AppColors.surfaceLight,
+                  behavior: SnackBarBehavior.floating,
+                  content: const Text('workout renamed', style: TextStyle(color: AppColors.textPrimary)),
+                  action: SnackBarAction(
+                    label: 'undo',
+                    textColor: AppColors.primary,
+                    onPressed: () {
+                      Provider.of<WorkoutData>(context, listen: false)
+                          .editWorkoutName(newName, oldName);
+                    },
+                  ),
+                ),
+              );
             },
             child: const Text('save', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
           ),
@@ -89,41 +115,40 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // confirm before deleting
-  void confirmDelete(String workoutName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text('delete workout?', style: TextStyle(color: AppColors.textPrimary)),
-        content: Text(
-          'this will permanently remove "$workoutName"',
-          style: const TextStyle(color: AppColors.textSecondary),
+  void deleteWorkout(String workoutName) {
+    final data = Provider.of<WorkoutData>(context, listen: false);
+    // snapshot the whole workout for undo
+    final workout = data.getRelevantWorkout(workoutName);
+    final snapshotExercises = workout.exercises.map((e) => Exercise(
+      name: e.name, weight: e.weight, reps: e.reps, sets: e.sets, isCompleted: e.isCompleted,
+    )).toList();
+    final snapshotIndex = data.getWorkoutList().indexOf(workout);
+
+    data.deleteWorkout(workoutName);
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: AppColors.surfaceLight,
+        behavior: SnackBarBehavior.floating,
+        content: Text('"$workoutName" deleted', style: const TextStyle(color: AppColors.textPrimary)),
+        action: SnackBarAction(
+          label: 'undo',
+          textColor: AppColors.primary,
+          onPressed: () {
+            final d = Provider.of<WorkoutData>(context, listen: false);
+            final restored = Workout(name: workoutName, exercises: snapshotExercises);
+            d.restoreWorkout(snapshotIndex, restored);
+          },
         ),
-        actions: [
-          MaterialButton(
-            onPressed: () {
-              Provider.of<WorkoutData>(context, listen: false).deleteWorkout(workoutName);
-              Navigator.pop(context);
-            },
-            child: const Text('delete', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w600)),
-          ),
-          MaterialButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('cancel', style: TextStyle(color: AppColors.textSecondary)),
-          )
-        ],
       ),
     );
   }
 
-  // go to workout page
   void goToWorkoutPage(String workoutName) {
     Navigator.push(context, MaterialPageRoute(builder: (context) => WorkoutPage(workoutName: workoutName)));
   }
 
-  // save func
   void save() {
     String newWorkoutName = newWorkoutController.text;
     Provider.of<WorkoutData>(context, listen: false).addWorkout(newWorkoutName);
@@ -131,18 +156,15 @@ class _HomePageState extends State<HomePage> {
     Navigator.pop(context);
   }
 
-  // cancel func
   void cancel() {
     newWorkoutController.clear();
     Navigator.pop(context);
   }
 
-  // builds a single swipeable workout tile
   Widget buildWorkoutTile(String workoutName) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Slidable(
-        // swipe left to reveal these actions
         endActionPane: ActionPane(
           motion: const DrawerMotion(),
           extentRatio: 0.45,
@@ -156,7 +178,7 @@ class _HomePageState extends State<HomePage> {
               borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
             ),
             SlidableAction(
-              onPressed: (context) => confirmDelete(workoutName),
+              onPressed: (context) => deleteWorkout(workoutName),
               backgroundColor: AppColors.danger,
               foregroundColor: Colors.white,
               icon: Icons.delete_rounded,
@@ -192,26 +214,78 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // controllers for the edit-logged-exercise dialog
-  final editLogNameController = TextEditingController();
+  // ── stats strip ─────────────────────────────────────────────────────────────
+
+  Widget buildStatsStrip(WorkoutData value) {
+    final thisMonth  = value.getWorkoutsThisMonth();
+    final allTime    = value.getWorkoutsAllTime();
+    final streak     = value.getCurrentStreak();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          _statCell('$thisMonth', 'workouts\nthis month', Icons.calendar_month_rounded),
+          _vertDivider(),
+          _statCell('$allTime', 'workouts\nall time', Icons.emoji_events_rounded),
+          _vertDivider(),
+          _statCell('$streak', 'current\nday streak', Icons.local_fire_department_rounded),
+        ],
+      ),
+    );
+  }
+
+  Widget _statCell(String value, String label, IconData icon) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: AppColors.primary, size: 18),
+          const SizedBox(height: 4),
+          Text(value, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 20)),
+          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11), textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+
+  Widget _vertDivider() {
+    return Container(width: 1, height: 40, color: AppColors.surfaceLight);
+  }
+
+  // ── day log sheet (heatmap tap) ──────────────────────────────────────────────
+
+  final editLogNameController   = TextEditingController();
   final editLogWeightController = TextEditingController();
-  final editLogRepsController = TextEditingController();
-  final editLogSetsController = TextEditingController();
+  final editLogRepsController   = TextEditingController();
+  final editLogSetsController   = TextEditingController();
 
-  // edit a single logged exercise from a past heatmap day
   void editDayLog(String ddmmyyyy, Map<String, String> log, VoidCallback onSaved) {
-    editLogNameController.text = log['exercise']!;
+    editLogNameController.text   = log['exercise']!;
     editLogWeightController.text = log['weight']!;
-    editLogRepsController.text = log['reps']!;
-    editLogSetsController.text = log['sets']!;
+    editLogRepsController.text   = log['reps']!;
+    editLogSetsController.text   = log['sets']!;
 
-    showDialog(
+    // snapshot for undo
+    final oldName   = log['exercise']!;
+    final oldWeight = log['weight']!;
+    final oldReps   = log['reps']!;
+    final oldSets   = log['sets']!;
+
+    showPremiumDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        elevation: 12,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
         title: const Text('edit logged exercise', style: TextStyle(color: AppColors.textPrimary)),
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
@@ -223,6 +297,7 @@ class _HomePageState extends State<HomePage> {
                 labelStyle: TextStyle(color: AppColors.textSecondary),
               ),
             ),
+            const SizedBox(height: 10),
             TextField(
               controller: editLogWeightController,
               style: const TextStyle(color: AppColors.textPrimary),
@@ -231,6 +306,7 @@ class _HomePageState extends State<HomePage> {
                 labelStyle: TextStyle(color: AppColors.textSecondary),
               ),
             ),
+            const SizedBox(height: 10),
             TextField(
               controller: editLogRepsController,
               style: const TextStyle(color: AppColors.textPrimary),
@@ -239,6 +315,7 @@ class _HomePageState extends State<HomePage> {
                 labelStyle: TextStyle(color: AppColors.textSecondary),
               ),
             ),
+            const SizedBox(height: 10),
             TextField(
               controller: editLogSetsController,
               style: const TextStyle(color: AppColors.textPrimary),
@@ -249,13 +326,14 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
+        ),
         actions: [
           MaterialButton(
             onPressed: () {
               Provider.of<WorkoutData>(context, listen: false).editLoggedExercise(
                 ddmmyyyy,
                 log['workout']!,
-                log['exercise']!,
+                oldName,
                 editLogNameController.text,
                 editLogWeightController.text,
                 editLogRepsController.text,
@@ -263,6 +341,29 @@ class _HomePageState extends State<HomePage> {
               );
               Navigator.pop(context);
               onSaved();
+
+              // undo
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  backgroundColor: AppColors.surfaceLight,
+                  behavior: SnackBarBehavior.floating,
+                  content: const Text('log updated', style: TextStyle(color: AppColors.textPrimary)),
+                  action: SnackBarAction(
+                    label: 'undo',
+                    textColor: AppColors.primary,
+                    onPressed: () {
+                      Provider.of<WorkoutData>(context, listen: false).editLoggedExercise(
+                        ddmmyyyy,
+                        log['workout']!,
+                        editLogNameController.text,
+                        oldName, oldWeight, oldReps, oldSets,
+                      );
+                      onSaved();
+                    },
+                  ),
+                ),
+              );
             },
             child: const Text('save', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
           ),
@@ -275,66 +376,40 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // controllers for the add-logged-exercise dialog
   final addLogWorkoutController = TextEditingController();
-  final addLogNameController = TextEditingController();
-  final addLogWeightController = TextEditingController();
-  final addLogRepsController = TextEditingController();
-  final addLogSetsController = TextEditingController();
+  final addLogNameController    = TextEditingController();
+  final addLogWeightController  = TextEditingController();
+  final addLogRepsController    = TextEditingController();
+  final addLogSetsController    = TextEditingController();
 
-  // manually add a logged exercise to any day (past or present)
-  void addDayLog(String ddmmyyyy, List<String> existingWorkoutNames, VoidCallback onSaved) {
-    addLogWorkoutController.text = existingWorkoutNames.isNotEmpty ? existingWorkoutNames.first : '';
+  void addDayLog(String ddmmyyyy, VoidCallback onSaved) {
     addLogNameController.clear();
     addLogWeightController.clear();
     addLogRepsController.clear();
     addLogSetsController.clear();
 
-    showDialog(
+    showPremiumDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        elevation: 12,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
         title: const Text('add to this day', style: TextStyle(color: AppColors.textPrimary)),
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // pick an existing workout name, or type a new one
-            if (existingWorkoutNames.isNotEmpty)
-              DropdownButtonFormField<String>(
-                initialValue: existingWorkoutNames.contains(addLogWorkoutController.text)
-                    ? addLogWorkoutController.text
-                    : existingWorkoutNames.first,
-                dropdownColor: AppColors.surface,
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: const InputDecoration(
-                  labelText: 'workout',
-                  labelStyle: TextStyle(color: AppColors.textSecondary),
-                ),
-                items: existingWorkoutNames
-                    .map((name) => DropdownMenuItem(value: name, child: Text(name)))
-                    .toList(),
-                onChanged: (val) => addLogWorkoutController.text = val ?? '',
-              )
-            else
-              TextField(
-                controller: addLogWorkoutController,
-                autofocus: true,
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: const InputDecoration(
-                  labelText: 'workout name',
-                  labelStyle: TextStyle(color: AppColors.textSecondary),
-                ),
-              ),
             TextField(
               controller: addLogNameController,
-              autofocus: existingWorkoutNames.isNotEmpty,
+              autofocus: true,
               style: const TextStyle(color: AppColors.textPrimary),
               decoration: const InputDecoration(
                 labelText: 'exercise name',
                 labelStyle: TextStyle(color: AppColors.textSecondary),
               ),
             ),
+            const SizedBox(height: 10),
             TextField(
               controller: addLogWeightController,
               style: const TextStyle(color: AppColors.textPrimary),
@@ -343,6 +418,7 @@ class _HomePageState extends State<HomePage> {
                 labelStyle: TextStyle(color: AppColors.textSecondary),
               ),
             ),
+            const SizedBox(height: 10),
             TextField(
               controller: addLogRepsController,
               style: const TextStyle(color: AppColors.textPrimary),
@@ -351,6 +427,7 @@ class _HomePageState extends State<HomePage> {
                 labelStyle: TextStyle(color: AppColors.textSecondary),
               ),
             ),
+            const SizedBox(height: 10),
             TextField(
               controller: addLogSetsController,
               style: const TextStyle(color: AppColors.textPrimary),
@@ -361,16 +438,14 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
+        ),
         actions: [
           MaterialButton(
             onPressed: () {
-              // need at least a workout and exercise name to make a meaningful entry
-              if (addLogWorkoutController.text.trim().isEmpty || addLogNameController.text.trim().isEmpty) {
-                return;
-              }
+              if (addLogNameController.text.trim().isEmpty) return;
               Provider.of<WorkoutData>(context, listen: false).addLoggedExercise(
                 ddmmyyyy,
-                addLogWorkoutController.text.trim(),
+                'Standalone',
                 addLogNameController.text.trim(),
                 addLogWeightController.text,
                 addLogRepsController.text,
@@ -390,87 +465,333 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // shows everything logged on a tapped heatmap day, editable/deletable in place
-  void showDayLogSheet(WorkoutData value, DateTime date) {
+  // note/rest-day dialog  
+  void showNoteDialog(String ddmmyyyy, String? existingNote, VoidCallback onSaved) {
+    final isRest = existingNote != null && existingNote.startsWith('__REST__');
+    final noteText = isRest ? existingNote.substring('__REST__'.length).trim() : (existingNote ?? '');
+
+    final noteCtrl = TextEditingController(text: noteText);
+    bool restDay = isRest;
+
+    showPremiumDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        elevation: 12,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+          title: const Text('day note', style: TextStyle(color: AppColors.textPrimary)),
+          content: SingleChildScrollView(
+            child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // rest day toggle
+              GestureDetector(
+                onTap: () => setDialogState(() => restDay = !restDay),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: restDay ? AppColors.primary.withValues(alpha: 0.15) : AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: restDay ? AppColors.primary.withValues(alpha: 0.5) : Colors.transparent,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.bedtime_rounded, color: restDay ? AppColors.primary : AppColors.textSecondary, size: 18),
+                      const SizedBox(width: 10),
+                      Text(
+                        'mark as rest day',
+                        style: TextStyle(
+                          color: restDay ? AppColors.primary : AppColors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (restDay) const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: noteCtrl,
+                autofocus: true,
+                maxLines: 3,
+                style: const TextStyle(color: AppColors.textPrimary),
+                decoration: InputDecoration(
+                  hintText: 'add a note (optional)',
+                  hintStyle: const TextStyle(color: AppColors.textSecondary),
+                  filled: true,
+                  fillColor: AppColors.surfaceLight,
+                  contentPadding: const EdgeInsets.all(12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          ),
+          actions: [
+            if (existingNote != null)
+              MaterialButton(
+                onPressed: () {
+                  Provider.of<WorkoutData>(ctx, listen: false).deleteDayNote(ddmmyyyy);
+                  Navigator.pop(ctx);
+                  onSaved();
+                },
+                child: const Text('remove', style: TextStyle(color: AppColors.danger)),
+              ),
+            MaterialButton(
+              onPressed: () {
+                final text = noteCtrl.text.trim();
+                final stored = restDay ? '__REST__$text' : text;
+                if (stored.isEmpty || stored == '__REST__') {
+                  Provider.of<WorkoutData>(ctx, listen: false).deleteDayNote(ddmmyyyy);
+                } else {
+                  Provider.of<WorkoutData>(ctx, listen: false).saveDayNote(ddmmyyyy, stored);
+                }
+                Navigator.pop(ctx);
+                onSaved();
+              },
+              child: const Text('save', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+            ),
+            MaterialButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('cancel', style: TextStyle(color: AppColors.textSecondary)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogStatChip(String label, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppColors.primary),
+          const SizedBox(width: 4),
+          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
+  void showDayLogSheet(DateTime date) {
     final ddmmyyyy = convertDateTimeObjectToDDMMYYYY(date);
 
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.surface,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) {
+      builder: (context) => Consumer<WorkoutData>(
+        builder: (context, value, _) {
           final logs = value.getLogsForDate(ddmmyyyy);
           final existingWorkoutNames = value.getWorkoutList().map((w) => w.name).toList();
+          final note = value.getDayNote(ddmmyyyy);
+          final isRestDay = note != null && note.startsWith('__REST__');
+          final noteText = note != null
+              ? (isRestDay ? note.substring('__REST__'.length).trim() : note)
+              : null;
+          void setSheetState(VoidCallback fn) { fn(); }
 
-          return Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}',
-                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w700),
-                    ),
-                    IconButton(
-                      onPressed: () => addDayLog(ddmmyyyy, existingWorkoutNames, () => setSheetState(() {})),
-                      icon: const Icon(Icons.add_circle_rounded, color: AppColors.primary),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                if (logs.isEmpty)
-                  const Text('nothing logged this day', style: TextStyle(color: AppColors.textSecondary))
-                else
-                  ...logs.map((log) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Slidable(
-                          endActionPane: ActionPane(
-                            motion: const DrawerMotion(),
-                            extentRatio: 0.4,
-                            children: [
-                              SlidableAction(
-                                onPressed: (context) => editDayLog(ddmmyyyy, log, () => setSheetState(() {})),
-                                backgroundColor: AppColors.primary,
-                                foregroundColor: Colors.white,
-                                icon: Icons.edit_rounded,
-                                label: 'edit',
-                                borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-                              ),
-                              SlidableAction(
-                                onPressed: (context) {
-                                  Provider.of<WorkoutData>(context, listen: false)
-                                      .deleteLoggedExercise(ddmmyyyy, log['workout']!, log['exercise']!);
-                                  setSheetState(() {});
-                                },
-                                backgroundColor: AppColors.danger,
-                                foregroundColor: Colors.white,
-                                icon: Icons.delete_rounded,
-                                label: 'delete',
-                                borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
-                              ),
-                            ],
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.5,
+            minChildSize: 0.3,
+            maxChildSize: 0.85,
+            builder: (context, scrollController) => Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: ListView(
+                controller: scrollController,
+                children: [
+                  // header row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}',
+                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w700),
+                      ),
+                      Row(
+                        children: [
+                          // note/rest day button
+                          IconButton(
+                            onPressed: () => showNoteDialog(ddmmyyyy, note, () => setSheetState(() {})),
+                            icon: Icon(
+                              Icons.edit_note_rounded,
+                              color: note != null ? AppColors.primary : AppColors.textSecondary,
+                            ),
+                            tooltip: 'add note / rest day',
                           ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.fitness_center_rounded, color: AppColors.primary, size: 18),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  '${log['exercise']} — ${log['weight']}, ${log['reps']} reps, ${log['sets']} sets',
-                                  style: const TextStyle(color: AppColors.textPrimary),
+                          // add exercise log
+                          IconButton(
+                            onPressed: () => addDayLog(ddmmyyyy, () => setSheetState(() {})),
+                            icon: const Icon(Icons.add_circle_rounded, color: AppColors.primary),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+
+                  // rest day / note badge
+                  if (isRestDay || (noteText != null && noteText.isNotEmpty))
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isRestDay
+                            ? AppColors.primary.withValues(alpha: 0.1)
+                            : AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(12),
+                        border: isRestDay
+                            ? Border.all(color: AppColors.primary.withValues(alpha: 0.3))
+                            : null,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isRestDay ? Icons.bedtime_rounded : Icons.notes_rounded,
+                            color: isRestDay ? AppColors.primary : AppColors.textSecondary,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              isRestDay
+                                  ? (noteText != null && noteText.isNotEmpty ? 'rest day · $noteText' : 'rest day')
+                                  : noteText!,
+                              style: TextStyle(
+                                color: isRestDay ? AppColors.primary : AppColors.textSecondary,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  const SizedBox(height: 6),
+
+                  // exercise logs
+                  if (logs.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 8),
+                      child: const Text('nothing logged this day', style: TextStyle(color: AppColors.textSecondary)),
+                    )
+                  else
+                    ...logs.map((log) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Slidable(
+                            endActionPane: ActionPane(
+                              motion: const DrawerMotion(),
+                              extentRatio: 0.4,
+                              children: [
+                                SlidableAction(
+                                  onPressed: (context) => editDayLog(ddmmyyyy, log, () => setSheetState(() {})),
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  icon: Icons.edit_rounded,
+                                  label: 'edit',
+                                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
                                 ),
+                                SlidableAction(
+                                  onPressed: (context) {
+                                    // snapshot for undo
+                                    final snap = Map<String, String>.from(log);
+                                    Provider.of<WorkoutData>(context, listen: false)
+                                        .deleteLoggedExercise(ddmmyyyy, log['workout']!, log['exercise']!);
+                                    setSheetState(() {});
+
+                                    ScaffoldMessenger.of(this.context).clearSnackBars();
+                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                      SnackBar(
+                                        backgroundColor: AppColors.surfaceLight,
+                                        behavior: SnackBarBehavior.floating,
+                                        content: Text('"${snap['exercise']}" removed', style: const TextStyle(color: AppColors.textPrimary)),
+                                        action: SnackBarAction(
+                                          label: 'undo',
+                                          textColor: AppColors.primary,
+                                          onPressed: () {
+                                            Provider.of<WorkoutData>(this.context, listen: false)
+                                                .addLoggedExercise(ddmmyyyy, snap['workout']!, snap['exercise']!, snap['weight']!, snap['reps']!, snap['sets']!);
+                                            setSheetState(() {});
+                                          },
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  backgroundColor: AppColors.danger,
+                                  foregroundColor: Colors.white,
+                                  icon: Icons.delete_rounded,
+                                  label: 'delete',
+                                  borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
+                                ),
+                              ],
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
                               ),
-                            ],
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(Icons.fitness_center_rounded, color: AppColors.primary, size: 16),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          log['exercise']!,
+                                          style: const TextStyle(
+                                            color: AppColors.textPrimary,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Wrap(
+                                          spacing: 6,
+                                          runSpacing: 6,
+                                          children: [
+                                            _buildLogStatChip(log['weight']!, Icons.scale_rounded),
+                                            _buildLogStatChip('${log['reps']} reps', Icons.repeat_rounded),
+                                            _buildLogStatChip('${log['sets']} sets', Icons.layers_rounded),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
-                      )),
-                const SizedBox(height: 10),
-              ],
+                        )),
+
+                  const SizedBox(height: 10),
+                ],
+              ),
             ),
           );
         },
@@ -488,22 +809,20 @@ class _HomePageState extends State<HomePage> {
           appBar: AppBar(
             title: const Text('workout tracker'),
           ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: createNewWorkout,
-            child: const Icon(Icons.add),
-          ),
           body: ListView(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
             children: [
-              // heat map showing daily completion history
+              // stats strip
+              buildStatsStrip(value),
+
+              // heat map
               MyHeatMap(
                 datasets: value.heatMapDataSet,
-                onDayTap: (date) => showDayLogSheet(value, date),
+                onDayTap: (date) => showDayLogSheet(date),
               ),
 
               const SizedBox(height: 16),
 
-              // empty state when no workouts exist yet
               if (workouts.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 40),
@@ -519,8 +838,34 @@ class _HomePageState extends State<HomePage> {
                   ),
                 )
               else
-                // workout list, one swipeable tile per workout
                 ...workouts.map((workout) => buildWorkoutTile(workout.name)),
+
+              const SizedBox(height: 12),
+
+              // inline "add workout" button, sits right under the workout
+              // list/empty-state instead of floating over the screen
+              Material(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(16),
+                child: InkWell(
+                  onTap: createNewWorkout,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.add_rounded, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Text(
+                          'add workout',
+                          style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         );
