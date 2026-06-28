@@ -1,17 +1,42 @@
-# workout_tracker
+# Workout Tracker
 
-A new Flutter project.
+A simple Flutter app to track your workouts, log exercises, watch your progress, and set goals - all stored locally on your phone.
 
-## Getting Started
+> **This is a beta release.** Things may break as it may be unstable. Feedback is welcome!
 
-This project is a starting point for a Flutter application.
+## Features
 
-A few resources to get you started if this is your first Flutter project:
+- Calendar heatmap of your workout days
+- Log exercises with weight, reps, and sets
+- Track progress and personal records (PRs) over time
+- Set and track goals (exercise or bodyweight)
+- Bodyweight logging
+- Everything stays on your device - no account, no cloud (yet)
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Install (Android)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+1. Go to the [Releases](../../releases) page
+2. Download the latest `.apk` file (or the version of your choice)
+3. Open it on your phone
+4. If prompted, allow installs from this source (settings will pop up automatically)
+5. Tap install - done
+
+## Run from source (for devs)
+
+```bash
+git clone <this-repo-url>
+cd workout_tracker
+flutter pub get
+flutter run
+```
+
+## Build your own APK
+
+```bash
+flutter build apk --release
+```
+The APK will be at `build/app/outputs/flutter-apk/app-release.apk`.
+
+## Feedback
+
+Feedback is welcome!
