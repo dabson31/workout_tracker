@@ -24,7 +24,7 @@ A simple Flutter app to track your workouts, log exercises, watch your progress,
 ## Run from source (for devs)
 
 ```bash
-git clone <this-repo-url>
+git clone <this-repo-url> (https://github.com/dabson31/workout_tracker.git)
 cd workout_tracker
 flutter pub get
 flutter run
