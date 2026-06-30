@@ -69,6 +69,7 @@ class _WeightPageState extends State<WeightPage> {
               ScaffoldMessenger.of(context).clearSnackBars();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
+                  duration: const Duration(seconds: 5),
                   backgroundColor: AppColors.surfaceLight,
                   behavior: SnackBarBehavior.floating,
                   content: const Text('weight updated', style: TextStyle(color: AppColors.textPrimary)),
@@ -103,6 +104,7 @@ class _WeightPageState extends State<WeightPage> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        duration: const Duration(seconds: 5),
         backgroundColor: AppColors.surfaceLight,
         behavior: SnackBarBehavior.floating,
         content: Text('${oldValue.toStringAsFixed(1)} kg removed', style: const TextStyle(color: AppColors.textPrimary)),

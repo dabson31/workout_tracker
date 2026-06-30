@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:workout_tracker/theme/app_theme.dart';
+import 'package:workout_tracker/utils/format_utils.dart';
 
 class ExerciseTile extends StatelessWidget {
   final String exerciseName;
@@ -18,6 +19,12 @@ class ExerciseTile extends StatelessWidget {
     required this.isCompleted,
     required this.onCheckBoxChanged,
   });
+
+  // "8" -> "8 reps", but "set 1: 8  set 2: 6" stays as-is (already self-explanatory)
+  String _repsLabel(String raw) {
+    final formatted = formatPerSetValue(raw);
+    return formatted.contains('set ') ? formatted : '$formatted reps';
+  }
 
   // small pill used for weight/reps/sets stats
   Widget buildStatChip(String label, IconData icon) {
@@ -66,8 +73,8 @@ class ExerciseTile extends StatelessWidget {
           child: Wrap(
             spacing: 8,
             children: [
-              buildStatChip(weight, Icons.fitness_center_rounded),
-              buildStatChip('$reps reps', Icons.repeat_rounded),
+              buildStatChip(formatPerSetValue(weight), Icons.fitness_center_rounded),
+              buildStatChip(_repsLabel(reps), Icons.repeat_rounded),
               buildStatChip('$sets sets', Icons.layers_rounded),
             ],
           ),

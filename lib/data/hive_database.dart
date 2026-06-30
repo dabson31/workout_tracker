@@ -1,6 +1,8 @@
 import 'package:hive/hive.dart';
 import 'package:workout_tracker/datetime/date_time.dart';
 import 'package:workout_tracker/models/exercise.dart';
+import 'package:workout_tracker/models/exercise_log_entry.dart';
+import 'package:workout_tracker/models/goal.dart';
 import 'package:workout_tracker/models/workout.dart';
 
 class HiveDatabase {
@@ -132,6 +134,10 @@ List<List<List<String>>> convertObjectToExerciseList(List<Workout> workouts) {
     return exerciseList;
 }
 
+// logs are stored as 'workout|exercise|weight|reps|sets|loggedAtMillis'.
+// the trailing timestamp field is appended on save so we know *when* (not
+// just which day) an exercise was logged, which powers the workout-duration
+// stats. Older logs saved before this field existed simply won't have it.
 void saveExerciseLog(String ddmmyyyy, String workoutName, String exerciseName, String weight, String reps, String sets) {
   extendStartDateIfEarlier(ddmmyyyy);
 
@@ -142,7 +148,8 @@ void saveExerciseLog(String ddmmyyyy, String workoutName, String exerciseName, S
     return parts[0] == workoutName && parts[1] == exerciseName;
   });
 
-  existingLogs.add('$workoutName|$exerciseName|$weight|$reps|$sets');
+  final loggedAt = DateTime.now().millisecondsSinceEpoch;
+  existingLogs.add('$workoutName|$exerciseName|$weight|$reps|$sets|$loggedAt');
   _myBox.put("LOG_$ddmmyyyy", existingLogs);
 }
 
@@ -152,12 +159,48 @@ void updateExerciseLog(String ddmmyyyy, String workoutName, String oldExerciseNa
   for (int i = 0; i < existingLogs.length; i++) {
     final parts = existingLogs[i].split('|');
     if (parts[0] == workoutName && parts[1] == oldExerciseName) {
-      existingLogs[i] = '$workoutName|$newExerciseName|$weight|$reps|$sets';
+      // keep the original logged-at timestamp rather than resetting it,
+      // since editing details after the fact shouldn't move when it
+      // "happened" for duration-tracking purposes.
+      final timestamp = parts.length > 5 ? parts[5] : '${DateTime.now().millisecondsSinceEpoch}';
+      existingLogs[i] = '$workoutName|$newExerciseName|$weight|$reps|$sets|$timestamp';
       break;
     }
   }
 
   _myBox.put("LOG_$ddmmyyyy", existingLogs);
+}
+
+// renames every historical log entry for [oldName] (across every day,
+// regardless of which workout it was logged under) to [newName]. Used so
+// that renaming an exercise in a workout keeps its whole log history,
+// PRs, and progress tracking attached to the new name instead of
+// silently splitting it into two exercises.
+void renameExerciseInAllLogs(String oldName, String newName) {
+  if (oldName == newName) return;
+
+  final start = createDateTimeObject(getStartDate());
+  final now = DateTime.now();
+  final days = now.difference(start).inDays + 1;
+
+  for (int i = 0; i < days; i++) {
+    final ddmmyyyy = convertDateTimeObjectToDDMMYYYY(start.add(Duration(days: i)));
+    final key = "LOG_$ddmmyyyy";
+    final existingLogs = List<String>.from(_myBox.get(key) ?? []);
+    if (existingLogs.isEmpty) continue;
+
+    bool changed = false;
+    for (int j = 0; j < existingLogs.length; j++) {
+      final parts = existingLogs[j].split('|');
+      if (parts[1] == oldName) {
+        parts[1] = newName;
+        existingLogs[j] = parts.join('|');
+        changed = true;
+      }
+    }
+
+    if (changed) _myBox.put(key, existingLogs);
+  }
 }
 
 void deleteExerciseLog(String ddmmyyyy, String workoutName, String exerciseName) {
@@ -182,8 +225,41 @@ List<Map<String, String>> getExerciseLogsForDate(String ddmmyyyy) {
       'weight': parts[2],
       'reps': parts[3],
       'sets': parts[4],
+      // may be absent on logs saved before timestamps were tracked
+      'timestamp': parts.length > 5 ? parts[5] : '',
     };
   }).toList();
+}
+
+// scans every day from START_DATE to today and groups every logged
+// exercise entry by exercise name, sorted oldest -> newest within each
+// group (since the day loop itself runs oldest -> newest). Used for
+// per-exercise progress tracking and PRs.
+Map<String, List<ExerciseLogEntry>> getAllExerciseLogsGrouped() {
+  final start = createDateTimeObject(getStartDate());
+  final now = DateTime.now();
+  final days = now.difference(start).inDays + 1;
+  final Map<String, List<ExerciseLogEntry>> grouped = {};
+
+  for (int i = 0; i < days; i++) {
+    final dt = start.add(Duration(days: i));
+    final ddmmyyyy = convertDateTimeObjectToDDMMYYYY(dt);
+    for (final log in getExerciseLogsForDate(ddmmyyyy)) {
+      final name = log['exercise']!;
+      grouped.putIfAbsent(name, () => []).add(
+        ExerciseLogEntry(
+          date: dt,
+          workoutName: log['workout']!,
+          exerciseName: name,
+          weight: log['weight']!,
+          reps: log['reps']!,
+          sets: log['sets']!,
+        ),
+      );
+    }
+  }
+
+  return grouped;
 }
 
 void recomputeCompletionStatus(String ddmmyyyy) {
@@ -278,8 +354,11 @@ int workoutsAllTime() {
   return count;
 }
 
-  // sum of all weight * sets * reps across every exercise log ever saved
-  // weight strings may end in "kg" — we strip that before parsing
+  // sum of all weight * reps across every set in every exercise log ever
+  // saved. Both weight and reps may be comma-separated per-set values
+  // ("20kg,22.5kg,25kg" / "8,8,6") or a single value applied to every set
+  // (older logs, or logs where every set was the same); weight strings may
+  // end in "kg" — we strip that before parsing.
 double totalWeightLifted() {
   final start = createDateTimeObject(getStartDate());
   final now = DateTime.now();
@@ -290,10 +369,16 @@ double totalWeightLifted() {
     final dt = start.add(Duration(days: i));
     final ddmmyyyy = convertDateTimeObjectToDDMMYYYY(dt);
     for (final log in getExerciseLogsForDate(ddmmyyyy)) {
-      final w = double.tryParse(log['weight']!.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
-      final r = double.tryParse(log['reps'] ?? '') ?? 0;
-      final s = double.tryParse(log['sets'] ?? '') ?? 0;
-      total += w * r * s;
+      final weightParts = (log['weight'] ?? '').split(',');
+      final repsParts = (log['reps'] ?? '').split(',');
+      for (int s = 0; s < weightParts.length; s++) {
+        final w = double.tryParse(weightParts[s].replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+        // use this set's own reps if present, otherwise fall back to the
+        // last known reps value (mirrors how per-set weight falls back)
+        final repsStr = s < repsParts.length ? repsParts[s] : (repsParts.isNotEmpty ? repsParts.last : '0');
+        final r = double.tryParse(repsStr) ?? 0;
+        total += w * r;
+      }
     }
   }
   return total;
@@ -334,6 +419,80 @@ int totalSetsLogged() {
   return total;
 }
 
+  // ── Workout duration ─────────────────────────────────────────────────────
+  //
+  // a "session" on a given day is built from the logged-at timestamps of
+  // that day's exercise logs: sorted oldest -> newest, a gap of 2 hours or
+  // more between two consecutive logs starts a new session (e.g. a morning
+  // lift and an evening lift on the same day count as two separate
+  // workouts, not one 12-hour one). Each session's duration is its last
+  // timestamp minus its first; a day with only one logged exercise (or no
+  // timestamps at all, e.g. legacy logs) contributes a zero-length session
+  // for that single point, since there's no second point to measure a span.
+  Duration _sumSessionDurations(List<int> sortedTimestamps) {
+    if (sortedTimestamps.isEmpty) return Duration.zero;
+    const twoHoursMs = 2 * 60 * 60 * 1000;
+
+    int totalMs = 0;
+    int sessionStart = sortedTimestamps.first;
+    int prev = sortedTimestamps.first;
+
+    for (int i = 1; i < sortedTimestamps.length; i++) {
+      final t = sortedTimestamps[i];
+      if (t - prev >= twoHoursMs) {
+        totalMs += prev - sessionStart;
+        sessionStart = t;
+      }
+      prev = t;
+    }
+    totalMs += prev - sessionStart;
+    return Duration(milliseconds: totalMs);
+  }
+
+  // total time worked out on a given day, or null if that day has no
+  // timestamped logs to measure (no logs, or only legacy logs without a
+  // recorded time).
+  Duration? workoutDurationForDate(String ddmmyyyy) {
+    final timestamps = getExerciseLogsForDate(ddmmyyyy)
+        .map((l) => l['timestamp'] ?? '')
+        .where((t) => t.isNotEmpty)
+        .map(int.parse)
+        .toList()
+      ..sort();
+    if (timestamps.isEmpty) return null;
+    return _sumSessionDurations(timestamps);
+  }
+
+  List<Duration> _allWorkoutDurations() {
+    final start = createDateTimeObject(getStartDate());
+    final now = DateTime.now();
+    final days = now.difference(start).inDays + 1;
+    final durations = <Duration>[];
+
+    for (int i = 0; i < days; i++) {
+      final ddmmyyyy = convertDateTimeObjectToDDMMYYYY(start.add(Duration(days: i)));
+      final d = workoutDurationForDate(ddmmyyyy);
+      if (d != null) durations.add(d);
+    }
+    return durations;
+  }
+
+  // sum of every day's workout duration, all time
+  Duration totalWorkoutTime() {
+    final durations = _allWorkoutDurations();
+    if (durations.isEmpty) return Duration.zero;
+    return durations.reduce((a, b) => a + b);
+  }
+
+  // average workout duration per day that has timestamped logs, or null if
+  // there's no timestamped data yet
+  Duration? averageWorkoutTime() {
+    final durations = _allWorkoutDurations();
+    if (durations.isEmpty) return null;
+    final totalMs = durations.fold<int>(0, (sum, d) => sum + d.inMilliseconds);
+    return Duration(milliseconds: totalMs ~/ durations.length);
+  }
+
   // current streak in days (consecutive workout days ending today or yesterday)
 int currentStreak() {
   final now = DateTime.now();
@@ -350,6 +509,18 @@ int currentStreak() {
     }
   }
   return streak;
+}
+
+  // ── Goals ──────────────────────────────────────────────────────────────────
+
+List<Goal> getGoals() {
+  final raw = List<String>.from(_myBox.get("GOALS") ?? []);
+  return raw.map((line) => Goal.fromStorageString(line)).toList();
+}
+
+void saveGoals(List<Goal> goals) {
+  final raw = goals.map((g) => g.toStorageString()).toList();
+  _myBox.put("GOALS", raw);
 }
 
 }

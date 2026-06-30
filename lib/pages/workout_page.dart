@@ -43,77 +43,160 @@ class _WorkoutPageState extends State<WorkoutPage> {
   }
 
   void openLogDialog(String workoutName, String exerciseName, String prevWeight, String prevReps, String prevSets) {
-    final prevWeightNumberOnly = prevWeight.replaceAll(RegExp(r'kg$', caseSensitive: false), '');
+    final prevWeightClean = prevWeight.replaceAll(RegExp(r'kg$', caseSensitive: false), '');
 
-    final weightController = TextEditingController(text: prevWeightNumberOnly);
-    final repsController = TextEditingController(text: prevReps);
+    // support both old single-weight ("25") and new per-set ("20,22.5,25") formats
+    final prevWeightParts = prevWeightClean.split(',').map((s) => s.trim()).toList();
+    final prevRepsParts = prevReps.split(',').map((s) => s.trim()).toList();
+
     final setsController = TextEditingController(text: prevSets);
 
     showPremiumDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        elevation: 12,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-        title: Text('log $exerciseName', style: const TextStyle(color: AppColors.textPrimary)),
-        content: SingleChildScrollView(
-          child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'previous: $prevWeight, $prevReps reps, $prevSets sets',
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: weightController,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(color: AppColors.textPrimary),
-              decoration: fieldDecoration('weight').copyWith(
-                suffixText: 'kg',
-                suffixStyle: const TextStyle(color: AppColors.textSecondary),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // keep weight/reps controllers in sync with the sets field
+          int setsCount = int.tryParse(setsController.text) ?? 1;
+          if (setsCount < 1) setsCount = 1;
+          if (setsCount > 20) setsCount = 20;
+
+          // lazily initialise once; grow/shrink as setsCount changes
+          if (!_weightControllers.containsKey(exerciseName) ||
+              _weightControllers[exerciseName]!.length != setsCount) {
+            final existing = _weightControllers[exerciseName] ?? <TextEditingController>[];
+            final next = List.generate(setsCount, (i) {
+              if (i < existing.length) return existing[i];
+              final seed = i < prevWeightParts.length ? prevWeightParts[i] : (prevWeightParts.isNotEmpty ? prevWeightParts.last : '');
+              return TextEditingController(text: seed);
+            });
+            _weightControllers[exerciseName] = next;
+          }
+          if (!_repsControllers.containsKey(exerciseName) ||
+              _repsControllers[exerciseName]!.length != setsCount) {
+            final existing = _repsControllers[exerciseName] ?? <TextEditingController>[];
+            final next = List.generate(setsCount, (i) {
+              if (i < existing.length) return existing[i];
+              final seed = i < prevRepsParts.length ? prevRepsParts[i] : (prevRepsParts.isNotEmpty ? prevRepsParts.last : '');
+              return TextEditingController(text: seed);
+            });
+            _repsControllers[exerciseName] = next;
+          }
+          final weightControllers = _weightControllers[exerciseName]!;
+          final repsControllers = _repsControllers[exerciseName]!;
+
+          return AlertDialog(
+            backgroundColor: AppColors.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            elevation: 12,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+            title: Text('log $exerciseName', style: const TextStyle(color: AppColors.textPrimary)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'previous: $prevWeight, $prevReps reps, $prevSets sets',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+
+                  TextField(
+                    controller: setsController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: AppColors.textPrimary),
+                    decoration: fieldDecoration('sets'),
+                    onChanged: (_) => setDialogState(() {}),
+                  ),
+
+                  const SizedBox(height: 14),
+                  const Text(
+                    'reps & weight per set',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // one reps + weight row per set
+                  ...List.generate(setsCount, (i) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: repsControllers[i],
+                            autofocus: i == 0,
+                            keyboardType: TextInputType.number,
+                            style: const TextStyle(color: AppColors.textPrimary),
+                            decoration: fieldDecoration('set ${i + 1} reps'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: weightControllers[i],
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            style: const TextStyle(color: AppColors.textPrimary),
+                            decoration: fieldDecoration('set ${i + 1} weight').copyWith(
+                              suffixText: 'kg',
+                              suffixStyle: const TextStyle(color: AppColors.textSecondary),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+                ],
               ),
             ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: repsController,
-              style: const TextStyle(color: AppColors.textPrimary),
-              decoration: fieldDecoration('reps'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: setsController,
-              style: const TextStyle(color: AppColors.textPrimary),
-              decoration: fieldDecoration('sets'),
-            ),
-          ],
-        ),
-        ),
-        actions: [
-          MaterialButton(
-            onPressed: () {
-              Provider.of<WorkoutData>(context, listen: false).logExercise(
-                workoutName,
-                exerciseName,
-                '${weightController.text}kg',
-                repsController.text,
-                setsController.text,
-              );
-              Navigator.pop(context);
-            },
-            child: const Text('log it', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
-          ),
-          MaterialButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('cancel', style: TextStyle(color: AppColors.textSecondary)),
-          ),
-        ],
+            actions: [
+              MaterialButton(
+                onPressed: () {
+                  final setsN = int.tryParse(setsController.text) ?? 1;
+                  final wControllers = _weightControllers[exerciseName] ?? [];
+                  final rControllers = _repsControllers[exerciseName] ?? [];
+                  // build comma-separated weight/reps strings, one value per set
+                  final weightString = List.generate(
+                    setsN.clamp(1, wControllers.length),
+                    (i) => '${wControllers[i].text}kg',
+                  ).join(',');
+                  final repsString = List.generate(
+                    setsN.clamp(1, rControllers.length),
+                    (i) => rControllers[i].text,
+                  ).join(',');
+
+                  Provider.of<WorkoutData>(context, listen: false).logExercise(
+                    workoutName,
+                    exerciseName,
+                    weightString,
+                    repsString,
+                    setsController.text,
+                  );
+                  _weightControllers.remove(exerciseName);
+                  _repsControllers.remove(exerciseName);
+                  Navigator.pop(context);
+                },
+                child: const Text('log it', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+              ),
+              MaterialButton(
+                onPressed: () {
+                  _weightControllers.remove(exerciseName);
+                  _repsControllers.remove(exerciseName);
+                  Navigator.pop(context);
+                },
+                child: const Text('cancel', style: TextStyle(color: AppColors.textSecondary)),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
+
+  // temporary per-exercise weight/reps controller maps, keyed by exercise
+  // name. stored at State level so they survive dialog rebuilds
+  // (StatefulBuilder re-runs the builder on every setDialogState call).
+  final Map<String, List<TextEditingController>> _weightControllers = {};
+  final Map<String, List<TextEditingController>> _repsControllers = {};
 
   final editExerciseController = TextEditingController();
 
@@ -193,6 +276,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
               ScaffoldMessenger.of(context).clearSnackBars();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
+                  duration: const Duration(seconds: 5),
                   backgroundColor: AppColors.surfaceLight,
                   behavior: SnackBarBehavior.floating,
                   content: const Text('exercise updated', style: TextStyle(color: AppColors.textPrimary)),
@@ -239,6 +323,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        duration: const Duration(seconds: 5),
         backgroundColor: AppColors.surfaceLight,
         behavior: SnackBarBehavior.floating,
         content: Text('"${snapshot.name}" deleted', style: const TextStyle(color: AppColors.textPrimary)),
